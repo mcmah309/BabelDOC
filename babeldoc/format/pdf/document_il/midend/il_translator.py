@@ -47,6 +47,34 @@ from babeldoc.utils.priority_thread_pool_executor import PriorityThreadPoolExecu
 logger = logging.getLogger(__name__)
 
 
+def box_to_dict(box) -> dict | None:
+    """Serialize an il_version_1.Box into a plain dict of PDF coordinates.
+
+    Coordinates are in PDF points with the origin at the bottom-left of the
+    page. Returns None when no box is available.
+    """
+    if box is None:
+        return None
+    return {"x": box.x, "y": box.y, "x2": box.x2, "y2": box.y2}
+
+
+def char_boxes(characters) -> list[dict]:
+    """Serialize per-character geometry for a list of PdfCharacter.
+
+    Provides the finest-grained source geometry we can expose for a mapping:
+    each entry pairs a single source character with its bounding box.
+    """
+    result = []
+    for char in characters or []:
+        result.append(
+            {
+                "char": char.char_unicode,
+                "box": box_to_dict(char.box),
+            }
+        )
+    return result
+
+
 PROMPT_TEMPLATE = Template(
     """$role_block
 
@@ -99,6 +127,12 @@ class RichTextPlaceholder:
             "right_placeholder": self.right_placeholder,
             "left_regex_pattern": self.left_regex_pattern,
             "right_regex_pattern": self.right_regex_pattern,
+            "box": box_to_dict(self.composition.box)
+            if self.composition
+            else None,
+            "char_boxes": char_boxes(self.composition.pdf_character)
+            if self.composition and self.composition.pdf_character
+            else [],
             "composition_chars": get_char_unicode_string(self.composition.pdf_character)
             if self.composition and self.composition.pdf_character
             else None,
@@ -124,6 +158,10 @@ class FormulaPlaceholder:
             "id": self.id,
             "placeholder": self.placeholder,
             "regex_pattern": self.regex_pattern,
+            "box": box_to_dict(self.formula.box) if self.formula else None,
+            "char_boxes": char_boxes(self.formula.pdf_character)
+            if self.formula and self.formula.pdf_character
+            else [],
             "formula_chars": get_char_unicode_string(self.formula.pdf_character)
             if self.formula and self.formula.pdf_character
             else None,
@@ -218,6 +256,9 @@ class DocumentTranslateTracker:
                 "input": i_str,
                 "output": o_str,
                 "pdf_unicode": pdf_unicode,
+                "page_number": getattr(para, "page_number", None),
+                "box": getattr(para, "box", None),
+                "layout_label": getattr(para, "layout_label", None),
                 "llm_translate_trackers": llm_translate_trackers_json,
                 "placeholders": placeholders_json,
                 "multi_paragraph_id": getattr(para, "multi_paragraph_id", None),
@@ -249,6 +290,17 @@ class ParagraphTranslateTracker:
 
     def set_pdf_unicode(self, unicode: str):
         self.pdf_unicode = unicode
+
+    def set_geometry(self, page_number, box):
+        """Record the source location of the paragraph on the page.
+
+        ``page_number`` is 0-based. ``box`` is captured before translation, so
+        it reflects the ORIGINAL (source) paragraph position. Because BabelDOC's
+        mono output replaces text in place, this box is also the region where the
+        translated text is rendered in the mono PDF.
+        """
+        self.page_number = page_number
+        self.box = box_to_dict(box)
 
     def set_input(self, input_text: str):
         self.input = input_text
@@ -425,6 +477,8 @@ class ILTranslator:
             with Path(path).open("w", encoding="utf-8") as f:
                 f.write(tracker.to_json())
 
+        return tracker
+
     def find_title_paragraph(self, docs: Document) -> PdfParagraph | None:
         """Find the first paragraph with layout_label 'title' in the document.
 
@@ -471,7 +525,7 @@ class ILTranslator:
                 paragraph,
                 page,
                 pbar,
-                tracker.new_paragraph(),
+                para_tracker := tracker.new_paragraph(),
                 page_font_map,
                 page_xobj_font_map,
                 priority=1048576 - paragraph_token_count,
@@ -479,6 +533,9 @@ class ILTranslator:
                 title_paragraph=self.translation_config.shared_context_cross_split_part.first_paragraph,
                 local_title_paragraph=self.translation_config.shared_context_cross_split_part.recent_title_paragraph,
             )
+            # Record source geometry (page + box) so translation mappings can be
+            # located on the page. Captured before translation mutates the paragraph.
+            para_tracker.set_geometry(page.page_number, paragraph.box)
 
     class TranslateInput:
         def __init__(
