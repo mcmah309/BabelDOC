@@ -660,6 +660,24 @@ def do_translate(
                                     part_monitor,
                                     part_config,
                                 )
+                                if result.translation_tracking:
+                                    for section in (
+                                        "cross_page",
+                                        "cross_column",
+                                        "page",
+                                    ):
+                                        for tracked_page in result.translation_tracking[
+                                            section
+                                        ]:
+                                            for paragraph in tracked_page["paragraph"]:
+                                                page_number = paragraph.get(
+                                                    "page_number"
+                                                )
+                                                if page_number is not None:
+                                                    paragraph["page_number"] = (
+                                                        page_number
+                                                        + split_point.start_page
+                                                    )
                                 results[i] = result
 
                             except Exception as e:
@@ -994,13 +1012,14 @@ def _do_translate_single(
             docs
         )
 
+    translation_tracker = None
     if not translation_config.skip_translation:
         if support_llm_translate:
             il_translator = ILTranslatorLLMOnly(translate_engine, translation_config)
         else:
             il_translator = ILTranslator(translate_engine, translation_config)
 
-        il_translator.translate(docs)
+        translation_tracker = il_translator.translate(docs)
         del il_translator
         logger.debug(f"finish ILTranslator from {temp_pdf_path}")
     else:
@@ -1067,6 +1086,11 @@ def _do_translate_single(
         result.dual_pdf_path = result.no_watermark_dual_pdf_path
 
     result.original_pdf_path = translation_config.input_file
+    if (
+        translation_tracker is not None
+        and translation_config.enable_translation_tracking
+    ):
+        result.translation_tracking = translation_tracker.to_dict()
 
     return result
 

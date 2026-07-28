@@ -109,7 +109,9 @@ class BatchParagraph:
             paragraphs, pages, self.trackers, strict=False
         ):
             tracker.set_geometry(
-                getattr(page, "page_number", None), getattr(paragraph, "box", None)
+                page.page_number,
+                paragraph.box,
+                paragraph.layout_label,
             )
 
 

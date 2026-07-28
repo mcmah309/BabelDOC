@@ -151,6 +151,30 @@ class ResultMerger:
         )
         merged_result.no_watermark_mono_pdf_path = merged_no_watermark_mono_path
         merged_result.no_watermark_dual_pdf_path = merged_no_watermark_dual_path
+        tracking_sections = {
+            "cross_page": [],
+            "cross_column": [],
+            "page": [],
+        }
+        next_batch_id = 0
+        for result in sorted_results.values():
+            if result.translation_tracking:
+                batch_id_map = {}
+                for section in tracking_sections:
+                    for tracked_page in result.translation_tracking.get(section, []):
+                        for paragraph in tracked_page["paragraph"]:
+                            batch_id = paragraph.get("multi_paragraph_id")
+                            if batch_id is None:
+                                continue
+                            if batch_id not in batch_id_map:
+                                batch_id_map[batch_id] = next_batch_id
+                                next_batch_id += 1
+                            paragraph["multi_paragraph_id"] = batch_id_map[batch_id]
+                    tracking_sections[section].extend(
+                        result.translation_tracking.get(section, [])
+                    )
+        if any(tracking_sections.values()):
+            merged_result.translation_tracking = tracking_sections
 
         if merged_result.no_watermark_mono_pdf_path is None:
             merged_result.no_watermark_mono_pdf_path = merged_mono_path

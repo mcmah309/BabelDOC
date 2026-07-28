@@ -217,6 +217,7 @@ class TranslationConfig:
         metadata_extra_data: str | None = None,
         term_pool_max_workers: int | None = None,
         disable_same_text_fallback: bool = False,
+        enable_translation_tracking: bool = False,
     ):
         self.translator = translator
         self.term_extraction_translator = term_extraction_translator or translator
@@ -376,6 +377,7 @@ class TranslationConfig:
             "cache_hit_prompt_tokens": 0,
         }
         self.disable_same_text_fallback = disable_same_text_fallback
+        self.enable_translation_tracking = enable_translation_tracking
 
         if self.ocr_workaround:
             self.remove_non_formula_lines = False
@@ -517,12 +519,14 @@ class TranslateResult:
     auto_extracted_glossary_path: Path | None
     total_valid_character_count: int | None
     total_valid_text_token_count: int | None
+    translation_tracking: dict | None
 
     def __init__(
         self,
         mono_pdf_path: Path | None,
         dual_pdf_path: Path | None,
         auto_extracted_glossary_path: Path | None = None,
+        translation_tracking: dict | None = None,
     ):
         self.mono_pdf_path = mono_pdf_path
         self.dual_pdf_path = dual_pdf_path
@@ -533,6 +537,7 @@ class TranslateResult:
         self.no_watermark_dual_pdf_path = dual_pdf_path
 
         self.auto_extracted_glossary_path = auto_extracted_glossary_path
+        self.translation_tracking = translation_tracking
         self.total_valid_character_count = None
         self.total_valid_text_token_count = None
 
