@@ -52,6 +52,7 @@ from babeldoc.format.pdf.split_manager import SplitManager
 from babeldoc.format.pdf.translation_config import TranslateResult
 from babeldoc.format.pdf.translation_config import TranslationConfig
 from babeldoc.format.pdf.translation_config import WatermarkOutputMode
+from babeldoc.format.pdf.translation_config import iter_tracked_paragraphs
 from babeldoc.progress_monitor import ProgressMonitor
 from babeldoc.utils import memory
 
@@ -254,6 +255,13 @@ def translator_supports_llm(translator) -> bool:
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.debug("translator %s failed llm detection: %s", translator, exc)
         return False
+
+
+def _rebase_tracked_page_numbers(tracking: dict, start_page: int) -> None:
+    """Turn the page numbers of a split part into document page numbers."""
+    for paragraph in iter_tracked_paragraphs(tracking):
+        if paragraph["page_number"] is not None:
+            paragraph["page_number"] += start_page
 
 
 def translate(translation_config: TranslationConfig) -> TranslateResult:
@@ -661,23 +669,10 @@ def do_translate(
                                     part_config,
                                 )
                                 if result.translation_tracking:
-                                    for section in (
-                                        "cross_page",
-                                        "cross_column",
-                                        "page",
-                                    ):
-                                        for tracked_page in result.translation_tracking[
-                                            section
-                                        ]:
-                                            for paragraph in tracked_page["paragraph"]:
-                                                page_number = paragraph.get(
-                                                    "page_number"
-                                                )
-                                                if page_number is not None:
-                                                    paragraph["page_number"] = (
-                                                        page_number
-                                                        + split_point.start_page
-                                                    )
+                                    _rebase_tracked_page_numbers(
+                                        result.translation_tracking,
+                                        split_point.start_page,
+                                    )
                                 results[i] = result
 
                             except Exception as e:
@@ -1086,10 +1081,7 @@ def _do_translate_single(
         result.dual_pdf_path = result.no_watermark_dual_pdf_path
 
     result.original_pdf_path = translation_config.input_file
-    if (
-        translation_tracker is not None
-        and translation_config.enable_translation_tracking
-    ):
+    if translation_config.enable_translation_tracking and translation_tracker:
         result.translation_tracking = translation_tracker.to_dict()
 
     return result

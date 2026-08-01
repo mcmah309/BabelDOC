@@ -4,6 +4,7 @@ import shutil
 import tempfile
 import threading
 from collections import Counter
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -508,6 +509,17 @@ class TranslationConfig:
             )
 
 
+# The sections of a translation tracking dict, see DocumentTranslateTracker.
+TRACKING_SECTIONS = ("cross_page", "cross_column", "page")
+
+
+def iter_tracked_paragraphs(tracking: dict) -> Iterator[dict]:
+    """Yield every paragraph of a `TranslateResult.translation_tracking` dict."""
+    for section in TRACKING_SECTIONS:
+        for page in tracking[section]:
+            yield from page["paragraph"]
+
+
 class TranslateResult:
     original_pdf_path: str
     total_seconds: float
@@ -526,7 +538,6 @@ class TranslateResult:
         mono_pdf_path: Path | None,
         dual_pdf_path: Path | None,
         auto_extracted_glossary_path: Path | None = None,
-        translation_tracking: dict | None = None,
     ):
         self.mono_pdf_path = mono_pdf_path
         self.dual_pdf_path = dual_pdf_path
@@ -537,7 +548,7 @@ class TranslateResult:
         self.no_watermark_dual_pdf_path = dual_pdf_path
 
         self.auto_extracted_glossary_path = auto_extracted_glossary_path
-        self.translation_tracking = translation_tracking
+        self.translation_tracking = None
         self.total_valid_character_count = None
         self.total_valid_text_token_count = None
 
