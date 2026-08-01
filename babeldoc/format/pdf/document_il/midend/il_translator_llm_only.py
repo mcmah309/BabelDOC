@@ -105,6 +105,11 @@ class BatchParagraph:
         self.paragraphs = paragraphs
         self.pages = pages
         self.trackers = [page_tracker.new_paragraph() for _ in paragraphs]
+        for paragraph, page, tracker in zip(
+            paragraphs, pages, self.trackers, strict=True
+        ):
+            tracker.set_geometry(page.page_number, paragraph.box)
+            tracker.set_layout_label(paragraph.layout_label)
 
 
 class ILTranslatorLLMOnly:
@@ -172,9 +177,11 @@ class ILTranslatorLLMOnly:
                     return paragraph
         return None
 
-    def translate(self, docs: Document) -> None:
+    def translate(self, docs: Document) -> DocumentTranslateTracker:
         self.il_translator.docs = docs
-        tracker = DocumentTranslateTracker()
+        tracker = DocumentTranslateTracker(
+            char_boxes=self.translation_config.enable_translation_tracking,
+        )
         self.mid = 0
 
         if not self.translation_config.shared_context_cross_split_part.first_paragraph:
@@ -255,6 +262,7 @@ class ILTranslatorLLMOnly:
         logger.info(
             f"Translation completed. Total: {self.total_count}, Successful: {self.ok_count}, Fallback: {self.fallback_count}"
         )
+        return tracker
 
     def _is_body_text_paragraph(self, paragraph: PdfParagraph) -> bool:
         """判断正文段落（当前仅 layout_label == 'text'）。
