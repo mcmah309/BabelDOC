@@ -1,5 +1,6 @@
 import logging
 from collections.abc import Iterable
+from copy import deepcopy
 from pathlib import Path
 
 from pymupdf import Document
@@ -187,7 +188,7 @@ class ResultMerger:
         merged = {section: [] for section in TRACKING_SECTIONS}
         next_batch_id = 0
         for result in results:
-            tracking = result.translation_tracking
+            tracking = deepcopy(result.translation_tracking)
             if not tracking:
                 continue
             batch_ids = {}

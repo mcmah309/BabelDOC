@@ -179,7 +179,12 @@ class ILTranslatorLLMOnly:
 
     def translate(self, docs: Document) -> DocumentTranslateTracker:
         self.il_translator.docs = docs
+        tracking_enabled = (
+            self.translation_config.enable_translation_tracking
+            or self.translation_config.debug
+        )
         tracker = DocumentTranslateTracker(
+            enabled=tracking_enabled,
             char_boxes=self.translation_config.enable_translation_tracking,
         )
         self.mid = 0
@@ -250,12 +255,10 @@ class ILTranslatorLLMOnly:
                             translated_ids,
                         )
 
-        path = self.translation_config.get_working_file_path("translate_tracking.json")
-
-        if (
-            self.translation_config.debug
-            or self.translation_config.working_dir is not None
-        ):
+        if tracking_enabled:
+            path = self.translation_config.get_working_file_path(
+                "translate_tracking.json"
+            )
             logger.debug(f"save translate tracking to {path}")
             with Path(path).open("w", encoding="utf-8") as f:
                 f.write(tracker.to_json())

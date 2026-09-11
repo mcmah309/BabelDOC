@@ -1014,7 +1014,10 @@ def _do_translate_single(
         else:
             il_translator = ILTranslator(translate_engine, translation_config)
 
-        translation_tracker = il_translator.translate(docs)
+        if translation_config.enable_translation_tracking:
+            translation_tracker = il_translator.translate(docs)
+        else:
+            il_translator.translate(docs)
         del il_translator
         logger.debug(f"finish ILTranslator from {temp_pdf_path}")
     else:
