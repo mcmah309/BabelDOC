@@ -4,6 +4,7 @@ import shutil
 import tempfile
 import threading
 from collections import Counter
+from collections.abc import Callable
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -219,7 +220,16 @@ class TranslationConfig:
         term_pool_max_workers: int | None = None,
         disable_same_text_fallback: bool = False,
         enable_translation_tracking: bool = False,
+        translation_prepared_callback: Callable[[list[tuple[int, str]]], None]
+        | None = None,
+        translation_unit_started_callback: Callable[[int], None] | None = None,
+        translation_unit_accepted_callback: Callable[[int], None] | None = None,
+        translation_unit_retry_callback: Callable[[int], None] | None = None,
     ):
+        self.translation_prepared_callback = translation_prepared_callback
+        self.translation_unit_started_callback = translation_unit_started_callback
+        self.translation_unit_accepted_callback = translation_unit_accepted_callback
+        self.translation_unit_retry_callback = translation_unit_retry_callback
         self.translator = translator
         self.term_extraction_translator = term_extraction_translator or translator
         initial_user_glossaries = list(glossaries) if glossaries else []

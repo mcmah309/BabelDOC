@@ -488,6 +488,9 @@ class ILTranslator:
             if title_paragraph:
                 logger.info(f"Found first title paragraph: {title_paragraph.unicode}")
 
+        # Prepared jobs retain the exact paragraph/input objects. No second layout
+        # or eligibility pass may change the source manifest after reservation.
+        self.prepared_jobs = []
         # count total paragraph
         total = sum(len(page.pdf_paragraph) for page in docs.page)
         with self.translation_config.progress_monitor.stage_start(
@@ -499,6 +502,21 @@ class ILTranslator:
             ) as executor:
                 for page in docs.page:
                     self.process_page(page, executor, pbar, tracker.new_page())
+                if self.translation_config.translation_prepared_callback is not None:
+                    self.translation_config.translation_prepared_callback(
+                        [
+                            (unit_id, source_text)
+                            for unit_id, source_text, _, _ in self.prepared_jobs
+                        ]
+                    )
+                    futures = [
+                        executor.submit(self.translate_paragraph, *args, **kwargs)
+                        for _, _, args, kwargs in self.prepared_jobs
+                    ]
+                    # Executor shutdown alone hides task failures. A failed parse or
+                    # rejected acceptance must fail the document, never report success.
+                    for future in futures:
+                        future.result()
 
         if tracking_enabled:
             path = self.translation_config.get_working_file_path(
@@ -554,19 +572,33 @@ class ILTranslator:
             para_tracker = tracker.new_paragraph()
             para_tracker.set_geometry(page.page_number, paragraph.box)
             para_tracker.set_layout_label(paragraph.layout_label)
-            executor.submit(
-                self.translate_paragraph,
+            args = (
                 paragraph,
                 page,
                 pbar,
                 para_tracker,
                 page_font_map,
                 page_xobj_font_map,
-                priority=1048576 - paragraph_token_count,
-                paragraph_token_count=paragraph_token_count,
-                title_paragraph=self.translation_config.shared_context_cross_split_part.first_paragraph,
-                local_title_paragraph=self.translation_config.shared_context_cross_split_part.recent_title_paragraph,
             )
+            kwargs = {
+                "priority": 1048576 - paragraph_token_count,
+                "paragraph_token_count": paragraph_token_count,
+                "title_paragraph": self.translation_config.shared_context_cross_split_part.first_paragraph,
+                "local_title_paragraph": self.translation_config.shared_context_cross_split_part.recent_title_paragraph,
+            }
+            if self.translation_config.translation_prepared_callback is None:
+                executor.submit(self.translate_paragraph, *args, **kwargs)
+                continue
+            source_text = paragraph.unicode
+            prepared_input = self.pre_translate_paragraph(
+                paragraph, para_tracker, page_font_map, page_xobj_font_map
+            )
+            if prepared_input[0] is None:
+                pbar.advance()
+                continue
+            unit_id = len(self.prepared_jobs)
+            kwargs.update(prepared_input=prepared_input, unit_id=unit_id)
+            self.prepared_jobs.append((unit_id, source_text, args, kwargs))
 
     class TranslateInput:
         def __init__(
@@ -1310,8 +1342,14 @@ class ILTranslator:
         paragraph_token_count: int = 0,
         title_paragraph: TitleContextSnapshot | None = None,
         local_title_paragraph: TitleContextSnapshot | None = None,
+        prepared_input=None,
+        unit_id: int | None = None,
     ):
         """Translate a paragraph using pre and post processing functions."""
+        if prepared_input is not None:
+            return self.translate_prepared_paragraph(
+                paragraph, pbar, tracker, prepared_input, unit_id, paragraph_token_count
+            )
         self.translation_config.raise_if_cancelled()
         with PbarContext(pbar):
             try:
@@ -1363,4 +1401,71 @@ class ILTranslator:
                     f"Error translating paragraph. Paragraph: {paragraph.debug_id} ({paragraph.unicode}). Error: {e}. ",
                 )
                 # ignore error and continue
+                return
+
+    def translate_prepared_paragraph(
+        self,
+        paragraph,
+        pbar,
+        tracker,
+        prepared_input,
+        unit_id,
+        paragraph_token_count,
+    ):
+        """Validate once, retry one rejected candidate, then accept its source identity."""
+        text, translate_input = prepared_input
+        original_unicode = paragraph.unicode
+        original_composition = paragraph.pdf_paragraph_composition
+        original_removed_placeholders = dict(tracker.removed_hallucinated_placeholders)
+        with PbarContext(pbar):
+            for validation_attempt in range(2):
+                self.translation_config.raise_if_cancelled()
+                if (
+                    self.translation_config.translation_unit_started_callback
+                    is not None
+                ):
+                    self.translation_config.translation_unit_started_callback(unit_id)
+                tracker.new_llm_translate_tracker()
+                # The prepared callback path uses paragraph engines. The owner
+                # handles transport retries; only output validation retries here.
+                translated = self.translate_engine.translate(
+                    text,
+                    ignore_cache=validation_attempt > 0,
+                    rate_limit_params={"paragraph_token_count": paragraph_token_count},
+                )
+                try:
+                    if not isinstance(translated, str) or not translated.strip():
+                        raise ValueError(
+                            f"Translation of prepared unit {unit_id} is empty"
+                        )
+                    translated = re.sub(r"[. 。…，]{20,}", ".", translated)
+                    self.post_translate_paragraph(
+                        paragraph, tracker, translate_input, translated
+                    )
+                except Exception:
+                    paragraph.unicode = original_unicode
+                    paragraph.pdf_paragraph_composition = original_composition
+                    tracker.removed_hallucinated_placeholders = dict(
+                        original_removed_placeholders
+                    )
+                    retry = self.translation_config.translation_unit_retry_callback
+                    if validation_attempt > 0 or retry is None:
+                        raise
+                    retry(unit_id)
+                    continue
+                if validation_attempt > 0 and not self.translate_engine.ignore_cache:
+                    # The retry bypasses a rejected cache value. Replace it only
+                    # after postprocessing accepts the new candidate.
+                    try:
+                        self.translate_engine.cache.set(text, translated)
+                    except Exception as error:
+                        logger.debug(
+                            "Could not refresh validated translation cache: %s", error
+                        )
+                # Acceptance rejection is not an output-validation retry.
+                if (
+                    self.translation_config.translation_unit_accepted_callback
+                    is not None
+                ):
+                    self.translation_config.translation_unit_accepted_callback(unit_id)
                 return

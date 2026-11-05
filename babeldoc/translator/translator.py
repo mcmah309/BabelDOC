@@ -81,6 +81,8 @@ class BaseTranslator(ABC):
     # cache.py: translate_engine = CharField(max_length=20)
     name = "base"
     lang_map = {}
+    # External schedulers may own limits for callback translators.
+    rate_limit_enabled = True
 
     def __init__(self, lang_in, lang_out, ignore_cache):
         self.ignore_cache = ignore_cache
@@ -132,7 +134,8 @@ class BaseTranslator(ABC):
                     return cache
             except Exception as e:
                 logger.debug(f"try get cache failed, ignore it: {e}")
-        _translate_rate_limiter.wait()
+        if self.rate_limit_enabled:
+            _translate_rate_limiter.wait()
         translation = self.do_translate(text, rate_limit_params)
         if not (self.ignore_cache or ignore_cache):
             self.cache.set(text, translation)
@@ -153,7 +156,8 @@ class BaseTranslator(ABC):
                     return cache
             except Exception as e:
                 logger.debug(f"try get cache failed, ignore it: {e}")
-        _translate_rate_limiter.wait()
+        if self.rate_limit_enabled:
+            _translate_rate_limiter.wait()
         translation = self.do_llm_translate(text, rate_limit_params)
         if not (self.ignore_cache or ignore_cache):
             try:
